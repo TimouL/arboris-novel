@@ -140,6 +140,13 @@ import ChapterContent from './workspace/ChapterContent.vue'
 import ChapterFailed from './workspace/ChapterFailed.vue'
 import ChapterEmpty from './workspace/ChapterEmpty.vue'
 
+interface VersionGroup {
+  modelKey: string
+  modelName: string
+  provider?: string | null
+  items: Array<{ version: ChapterVersion; globalIndex: number }>
+}
+
 interface Props {
   project: NovelProject | null
   selectedChapterNumber: number | null
@@ -149,6 +156,7 @@ interface Props {
   chapterGenerationResult: ChapterGenerationResponse | null
   selectedVersionIndex: number
   availableVersions: ChapterVersion[]
+  groupedVersions: VersionGroup[]
   isSelectingVersion?: boolean
 }
 
@@ -367,6 +375,7 @@ const currentComponentProps = computed(() => {
       selectedChapter: selectedChapter.value,
       chapterGenerationResult: props.chapterGenerationResult,
       availableVersions: props.availableVersions,
+      groupedVersions: props.groupedVersions,
       selectedVersionIndex: props.selectedVersionIndex,
       isSelectingVersion: props.isSelectingVersion,
       evaluatingChapter: props.evaluatingChapter,

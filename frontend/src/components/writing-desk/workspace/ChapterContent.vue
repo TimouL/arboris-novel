@@ -25,7 +25,12 @@
 
     <div class="bg-gray-50 rounded-xl p-6">
       <div class="flex items-center justify-between mb-4 gap-3">
-        <h4 class="font-semibold text-gray-800">章节内容</h4>
+        <div>
+          <h4 class="font-semibold text-gray-800">章节内容</h4>
+          <p v-if="currentVersionInfo" class="text-xs text-gray-500 mt-1">
+            当前版本由 {{ currentVersionInfo.modelName }} 生成
+          </p>
+        </div>
         <div class="flex items-center gap-3">
           <div class="text-sm text-gray-500">
             约 {{ Math.round(cleanVersionContent(selectedChapter.content || '').length / 100) * 100 }} 字
@@ -51,13 +56,15 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Chapter } from '@/api/novel'
 
 interface Props {
   selectedChapter: Chapter
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
+const selectedChapter = computed(() => props.selectedChapter)
 
 defineEmits(['showVersionSelector'])
 
@@ -99,4 +106,15 @@ const exportChapterAsTxt = (chapter?: Chapter | null) => {
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
 }
+
+const currentVersionInfo = computed(() => {
+  if (!props.selectedChapter?.content || !props.selectedChapter.versions) return null
+  const target = cleanVersionContent(props.selectedChapter.content)
+  const match = props.selectedChapter.versions.find(version => cleanVersionContent(version.content).trim() === target.trim())
+  if (!match) return null
+  const metadata = match.metadata || {}
+  return {
+    modelName: metadata.model_name || match.label || (metadata.source === 'addon' ? metadata.model_key : '主模型')
+  }
+})
 </script>

@@ -137,6 +137,24 @@ export interface SystemConfigUpsertPayload {
 
 export type SystemConfigUpdatePayload = Partial<SystemConfigUpsertPayload>
 
+export interface WritingModelConfig {
+  key: string
+  display_name: string
+  provider?: string | null
+  model: string
+  base_url?: string | null
+  api_key?: string | null
+  temperature: number
+  variants: number
+  enabled: boolean
+}
+
+export interface WritingModelSettings {
+  enabled: boolean
+  fallback_variants: number
+  models: WritingModelConfig[]
+}
+
 export class AdminAPI {
   private static request(path: string, options: RequestInit = {}) {
     return adminRequest(path, options)
@@ -256,6 +274,17 @@ export class AdminAPI {
   static deleteSystemConfig(key: string): Promise<void> {
     return this.request(`/system-configs/${key}`, {
       method: 'DELETE'
+    })
+  }
+
+  static getWritingModelSettings(): Promise<WritingModelSettings> {
+    return this.request('/writing-models/settings')
+  }
+
+  static updateWritingModelSettings(payload: WritingModelSettings): Promise<WritingModelSettings> {
+    return this.request('/writing-models/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
     })
   }
 

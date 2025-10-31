@@ -110,6 +110,8 @@ CREATE TABLE IF NOT EXISTS chapter_versions (
     CONSTRAINT fk_versions_chapter FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS idx_chapter_versions_provider ON chapter_versions(provider);
+
 ALTER TABLE chapters
     ADD CONSTRAINT fk_chapter_selected_version
     FOREIGN KEY (selected_version_id) REFERENCES chapter_versions(id)

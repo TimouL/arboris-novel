@@ -53,10 +53,17 @@ class ChapterOutline(BaseModel):
     summary: str
 
 
+class ChapterVersionSchema(BaseModel):
+    content: str
+    metadata: Dict[str, Any] = {}
+    provider: Optional[str] = None
+    label: Optional[str] = None
+
+
 class Chapter(ChapterOutline):
     real_summary: Optional[str] = None
     content: Optional[str] = None
-    versions: Optional[List[str]] = None
+    versions: Optional[List[ChapterVersionSchema]] = None
     evaluation: Optional[str] = None
     generation_status: ChapterGenerationStatus = ChapterGenerationStatus.NOT_GENERATED
 
@@ -110,7 +117,7 @@ class BlueprintGenerationResponse(BaseModel):
 
 class ChapterGenerationResponse(BaseModel):
     ai_message: str
-    chapter_versions: List[Dict[str, Any]]
+    chapter_versions: List[ChapterVersionSchema]
 
 
 class NovelSectionType(str, Enum):

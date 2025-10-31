@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -398,17 +399,20 @@ class NovelService:
         await self.session.refresh(chapter)
         return chapter
 
-    async def replace_chapter_versions(self, chapter: Chapter, contents: List[str], metadata: Optional[List[Dict]] = None) -> List[ChapterVersion]:
+    async def replace_chapter_versions(self, chapter: Chapter, payloads: List[ChapterVersionPayload]) -> List[ChapterVersion]:
         await self.session.execute(delete(ChapterVersion).where(ChapterVersion.chapter_id == chapter.id))
         versions: List[ChapterVersion] = []
-        for index, content in enumerate(contents):
-            extra = metadata[index] if metadata and index < len(metadata) else None
-            text_content = _normalize_version_content(content, extra)
+        for index, payload in enumerate(payloads, start=1):
+            text_content = _normalize_version_content(payload.content, payload.metadata)
+            metadata = dict(payload.metadata or {})
+            metadata.pop("content", None)
+            metadata.pop("chapter_content", None)
             version = ChapterVersion(
                 chapter_id=chapter.id,
                 content=text_content,
-                metadata=None,
-                version_label=f"v{index+1}",
+                metadata=metadata or None,
+                version_label=payload.label or f"v{index}",
+                provider=payload.provider,
             )
             self.session.add(version)
             versions.append(version)
@@ -680,7 +684,12 @@ class NovelService:
                     content = chapter.selected_version.content
                 if chapter.versions:
                     versions = [
-                        v.content
+                        {
+                            "content": v.content,
+                            "metadata": v.metadata or {},
+                            "provider": v.provider,
+                            "label": v.version_label,
+                        }
                         for v in sorted(chapter.versions, key=lambda item: item.created_at)
                     ]
                 if chapter.evaluations:
@@ -698,3 +707,9 @@ class NovelService:
             generation_status=ChapterGenerationStatus(status_value),
             word_count=word_count,
         )
+@dataclass
+class ChapterVersionPayload:
+    content: str
+    metadata: Dict[str, Any]
+    provider: Optional[str] = None
+    label: Optional[str] = None

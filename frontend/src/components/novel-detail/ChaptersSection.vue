@@ -178,17 +178,20 @@
                         <span class="w-6 h-6 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xs font-bold">
                           {{ index + 1 }}
                         </span>
-                        版本 {{ index + 1 }}
+                        {{ resolveVersionLabel(version, index) }}
                       </h5>
                       <div class="flex items-center gap-3">
-                        <span class="text-xs text-slate-500">{{ calculateWordCount(version) }} 字</span>
+                        <span class="text-xs text-slate-500">{{ calculateWordCount(resolveVersionContent(version)) }} 字</span>
+                        <span v-if="resolveVersionProvider(version)" class="text-xs text-slate-400">
+                          {{ resolveVersionProvider(version) }}
+                        </span>
                         <span class="text-xs font-medium text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity">
                           点击查看全文 →
                         </span>
                       </div>
                     </div>
                     <div class="text-sm text-slate-700 leading-7 whitespace-pre-wrap line-clamp-4">
-                      {{ version }}
+                      {{ resolveVersionContent(version).substring(0, 280) }}{{ resolveVersionContent(version).length > 280 ? '...' : '' }}
                     </div>
                   </div>
                 </div>
@@ -375,8 +378,11 @@
                 {{ versionModal.index + 1 }}
               </span>
               <div>
-                <h3 class="text-lg font-bold text-slate-900">版本 {{ versionModal.index + 1 }}</h3>
-                <p class="text-xs text-slate-500">{{ calculateWordCount(versionModal.content) }} 字</p>
+                <h3 class="text-lg font-bold text-slate-900">{{ versionModal.label || `版本 ${versionModal.index + 1}` }}</h3>
+                <p class="text-xs text-slate-500">
+                  {{ calculateWordCount(versionModal.content) }} 字
+                  <span v-if="versionModal.provider" class="ml-2 text-slate-400">{{ versionModal.provider }}</span>
+                </p>
               </div>
             </div>
             <button @click="closeVersionModal"
@@ -403,7 +409,7 @@
 
 <script setup lang="ts">
 import { computed, defineProps, ref, watch } from 'vue'
-import { NovelAPI } from '@/api/novel'
+import { NovelAPI, type ChapterVersion } from '@/api/novel'
 import { AdminAPI } from '@/api/admin'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
@@ -418,7 +424,7 @@ interface ChapterItem {
 
 interface ChapterDetail extends ChapterItem {
   real_summary?: string | null
-  versions?: string[] | null
+  versions?: (ChapterVersion | string)[] | null
   evaluation?: string | null
   generation_status?: string
 }
@@ -443,7 +449,9 @@ const showChapterList = ref(false)
 const versionModal = ref({
   show: false,
   content: '',
-  index: 0
+  index: 0,
+  label: '',
+  provider: '' as string | undefined
 })
 
 // 缓存已加载的章节详情
@@ -463,6 +471,25 @@ const calculateWordCount = (content: string | null | undefined): number => {
   if (!content) return 0
   // 移除所有空白字符后计算字数
   return content.replace(/\s/g, '').length
+}
+
+const resolveVersionContent = (version: ChapterVersion | string): string => {
+  if (typeof version === 'string') {
+    return version
+  }
+  return version.content || ''
+}
+
+const resolveVersionLabel = (version: ChapterVersion | string, index: number): string => {
+  if (typeof version === 'string') {
+    return `版本 ${index + 1}`
+  }
+  return version.label || `版本 ${index + 1}`
+}
+
+const resolveVersionProvider = (version: ChapterVersion | string): string | undefined => {
+  if (typeof version === 'string') return undefined
+  return version.provider || (version.metadata && (version.metadata as any).model_name)
 }
 
 // 获取状态标签
@@ -527,11 +554,13 @@ const exportChapterAsTxt = () => {
 }
 
 // 打开版本弹窗
-const openVersionModal = (content: string, index: number) => {
+const openVersionModal = (version: ChapterVersion | string, index: number) => {
   versionModal.value = {
     show: true,
-    content,
-    index
+    content: resolveVersionContent(version),
+    index,
+    label: resolveVersionLabel(version, index),
+    provider: resolveVersionProvider(version)
   }
 }
 

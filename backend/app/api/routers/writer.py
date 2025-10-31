@@ -1,7 +1,8 @@
 import json
+import json
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import select
@@ -22,12 +23,14 @@ from ...schemas.novel import (
     UpdateChapterOutlineRequest,
 )
 from ...schemas.user import UserInDB
+from ...services.addon_writer_service import AddonGenerationContext, AddonWriterService
 from ...services.chapter_context_service import ChapterContextService
 from ...services.chapter_ingest_service import ChapterIngestionService
 from ...services.llm_service import LLMService
-from ...services.novel_service import NovelService
+from ...services.novel_service import ChapterVersionPayload, NovelService
 from ...services.prompt_service import PromptService
 from ...services.vector_store_service import VectorStoreService
+from ...services.writing_model_service import WritingModelService
 from ...utils.json_utils import remove_think_tags, unwrap_markdown_json
 from ...repositories.system_config_repository import SystemConfigRepository
 
@@ -59,6 +62,8 @@ async def generate_chapter(
     novel_service = NovelService(session)
     prompt_service = PromptService(session)
     llm_service = LLMService(session)
+    writing_model_service = WritingModelService(session)
+    addon_writer_service = AddonWriterService(llm_service, writing_model_service)
 
     project = await novel_service.ensure_project_owner(project_id, current_user.id)
     logger.info("用户 %s 开始为项目 %s 生成第 %s 章", current_user.id, project_id, request.chapter_number)
@@ -231,6 +236,36 @@ async def generate_chapter(
                 detail=f"生成章节第 {idx + 1} 个版本时失败: {str(exc)[:200]}"
             )
 
+    def _build_payload_from_variant(
+        raw_variant: Any,
+        *,
+        base_meta: Dict[str, Any],
+        label: Optional[str] = None,
+        provider: Optional[str] = None,
+    ) -> ChapterVersionPayload:
+        if isinstance(raw_variant, dict):
+            if "content" in raw_variant and isinstance(raw_variant["content"], str):
+                content_text = raw_variant["content"]
+            elif "chapter_content" in raw_variant:
+                content_text = str(raw_variant["chapter_content"])
+            else:
+                content_text = json.dumps(raw_variant, ensure_ascii=False)
+            metadata = {
+                key: value
+                for key, value in raw_variant.items()
+                if key not in {"content", "chapter_content"}
+            }
+        else:
+            content_text = str(raw_variant)
+            metadata = {"raw": raw_variant}
+        merged_meta = {**metadata, **base_meta}
+        return ChapterVersionPayload(
+            content=content_text,
+            metadata=merged_meta,
+            provider=provider or merged_meta.get("provider"),
+            label=label,
+        )
+
     version_count = await _resolve_version_count(session)
     logger.info(
         "项目 %s 第 %s 章计划生成 %s 个版本",
@@ -238,30 +273,37 @@ async def generate_chapter(
         request.chapter_number,
         version_count,
     )
-    raw_versions = []
+    version_payloads: List[ChapterVersionPayload] = []
     for idx in range(version_count):
-        raw_versions.append(await _generate_single_version(idx))
-    contents: List[str] = []
-    metadata: List[Dict] = []
-    for variant in raw_versions:
-        if isinstance(variant, dict):
-            if "content" in variant and isinstance(variant["content"], str):
-                contents.append(variant["content"])
-            elif "chapter_content" in variant:
-                contents.append(str(variant["chapter_content"]))
-            else:
-                contents.append(json.dumps(variant, ensure_ascii=False))
-            metadata.append(variant)
-        else:
-            contents.append(str(variant))
-            metadata.append({"raw": variant})
+        base_variant = await _generate_single_version(idx)
+        payload = _build_payload_from_variant(
+            base_variant,
+            base_meta={
+                "source": "primary",
+                "model_key": "primary",
+                "model_name": "主模型",
+                "variant_index": idx,
+                "provider": "primary",
+            },
+        )
+        version_payloads.append(payload)
 
-    await novel_service.replace_chapter_versions(chapter, contents, metadata)
+    addon_context = AddonGenerationContext(
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_number=request.chapter_number,
+        system_prompt=writer_prompt,
+        prompt_input=prompt_input,
+    )
+    addon_payloads = await addon_writer_service.generate_versions(addon_context)
+    version_payloads.extend(addon_payloads)
+
+    await novel_service.replace_chapter_versions(chapter, version_payloads)
     logger.info(
         "项目 %s 第 %s 章生成完成，已写入 %s 个版本",
         project_id,
         request.chapter_number,
-        len(contents),
+        len(version_payloads),
     )
     return await _load_project_schema(novel_service, project_id, current_user.id)
 

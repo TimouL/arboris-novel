@@ -86,7 +86,9 @@ export interface ChapterOutline {
 
 export interface ChapterVersion {
   content: string
-  style?: string
+  metadata?: Record<string, any>
+  provider?: string | null
+  label?: string | null
 }
 
 export interface Chapter {
@@ -94,7 +96,7 @@ export interface Chapter {
   title: string
   summary: string
   content: string | null
-  versions: string[] | null  // versions是字符串数组，不是对象数组
+  versions: ChapterVersion[] | null
   evaluation: string | null
   generation_status: 'not_generated' | 'generating' | 'evaluating' | 'selecting' | 'failed' | 'evaluation_failed' | 'waiting_for_confirm' | 'successful'
   word_count?: number  // 字数统计

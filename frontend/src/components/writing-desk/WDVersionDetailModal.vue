@@ -6,11 +6,10 @@
         <div>
           <h3 class="text-xl font-bold text-gray-900">版本详情</h3>
           <p class="text-sm text-gray-600 mt-1">
-            版本 {{ detailVersionIndex + 1 }}
-            <span class="text-gray-400">•</span>
-            {{ version?.style || '标准' }}风格
+            版本 {{ version?.label || detailVersionIndex + 1 }}
             <span class="text-gray-400">•</span>
             约 {{ Math.round(cleanVersionContent(version?.content || '').length / 100) * 100 }} 字
+            <span v-if="version?.provider" class="text-gray-400">• {{ version.provider }}</span>
           </p>
         </div>
         <button

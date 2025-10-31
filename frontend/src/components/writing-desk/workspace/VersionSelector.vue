@@ -102,61 +102,76 @@
         </button> -->
       </div>
 
-      <div class="grid gap-3">
-        <div
-          v-for="(version, index) in availableVersions"
-          :key="index"
-          @click="$emit('update:selectedVersionIndex', index)"
-          :class="[
-            'cursor-pointer border-2 rounded-lg p-4 transition-all duration-200',
-            selectedVersionIndex === index
-              ? 'border-indigo-300 bg-indigo-50 shadow-md'
-              : isCurrentVersion(index)
-              ? 'border-green-300 bg-green-50'
-              : 'border-gray-200 hover:border-indigo-200 hover:bg-white'
-          ]"
+      <div class="space-y-4">
+        <section
+          v-for="group in groupedVersions"
+          :key="group.modelKey"
+          class="space-y-3"
         >
-          <div class="flex items-start gap-3">
+          <header class="flex items-center gap-2 text-sm text-gray-600">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M10 3a1 1 0 01.894.553l1.382 2.763 3.05.444a1 1 0 01.554 1.705l-2.205 2.149.521 3.035a1 1 0 01-1.451 1.054L10 13.347l-2.745 1.446a1 1 0 01-1.451-1.054l.521-3.035-2.205-2.149a1 1 0 01.554-1.705l3.05-.444L9.106 3.553A1 1 0 0110 3z" clip-rule="evenodd"></path>
+            </svg>
+            <span class="font-semibold text-gray-800">{{ group.modelName }}</span>
+            <span v-if="group.provider" class="text-xs text-gray-400">({{ group.provider }})</span>
+            <span class="text-xs text-gray-400">— {{ group.items.length }} 个版本</span>
+          </header>
+          <div class="grid gap-3">
             <div
+              v-for="item in group.items"
+              :key="item.globalIndex"
+              @click="$emit('update:selectedVersionIndex', item.globalIndex)"
               :class="[
-                'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
-                selectedVersionIndex === index
-                  ? 'bg-indigo-500 text-white'
-                  : isCurrentVersion(index)
-                  ? 'bg-green-500 text-white'
-                  : 'bg-gray-300 text-gray-600'
+                'cursor-pointer border-2 rounded-lg p-4 transition-all duration-200',
+                selectedVersionIndex === item.globalIndex
+                  ? 'border-indigo-300 bg-indigo-50 shadow-md'
+                  : isCurrentVersion(item.globalIndex)
+                  ? 'border-green-300 bg-green-50'
+                  : 'border-gray-200 hover:border-indigo-200 hover:bg-white'
               ]"
             >
-              <svg v-if="isCurrentVersion(index)" class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-              </svg>
-              <span v-else>{{ index + 1 }}</span>
-            </div>
-            <div class="flex-1">
-              <p class="text-sm text-gray-700 line-clamp-3">
-                {{ cleanVersionContent(version.content).substring(0, 150) }}...
-              </p>
-              <div class="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                <span>约 {{ Math.round(cleanVersionContent(version.content).length / 100) * 100 }} 字</span>
-                <span>•</span>
-                <span>{{ version.style || '标准' }}风格</span>
-                <span v-if="isCurrentVersion(index)" class="text-green-600 font-medium">• 当前选中</span>
-              </div>
-              <div class="mt-2">
-                <button
-                  @click.stop="$emit('showVersionDetail', index)"
-                  class="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
+              <div class="flex items-start gap-3">
+                <div
+                  :class="[
+                    'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
+                    selectedVersionIndex === item.globalIndex
+                      ? 'bg-indigo-500 text-white'
+                      : isCurrentVersion(item.globalIndex)
+                      ? 'bg-green-500 text-white'
+                      : 'bg-gray-300 text-gray-600'
+                  ]"
                 >
-                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"></path>
-                    <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"></path>
+                  <svg v-if="isCurrentVersion(item.globalIndex)" class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
                   </svg>
-                  查看详情
-                </button>
+                  <span v-else>{{ item.globalIndex + 1 }}</span>
+                </div>
+                <div class="flex-1">
+                  <p class="text-sm text-gray-700 line-clamp-3">
+                    {{ cleanVersionContent(item.version.content).substring(0, 150) }}...
+                  </p>
+                  <div class="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                    <span>约 {{ Math.round(cleanVersionContent(item.version.content).length / 100) * 100 }} 字</span>
+                    <span v-if="item.version.label">• {{ item.version.label }}</span>
+                    <span v-if="isCurrentVersion(item.globalIndex)" class="text-green-600 font-medium">• 当前选中</span>
+                  </div>
+                  <div class="mt-2">
+                    <button
+                      @click.stop="$emit('showVersionDetail', item.globalIndex)"
+                      class="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
+                    >
+                      <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"></path>
+                        <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"></path>
+                      </svg>
+                      查看详情
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </section>
       </div>
 
       <div class="mt-4 flex justify-end items-center gap-4">
@@ -191,10 +206,18 @@
 import { computed } from 'vue'
 import type { Chapter, ChapterGenerationResponse, ChapterVersion } from '@/api/novel'
 
+interface VersionGroup {
+  modelKey: string
+  modelName: string
+  provider?: string | null
+  items: Array<{ version: ChapterVersion; globalIndex: number }>
+}
+
 interface Props {
   selectedChapter: Chapter | null
   chapterGenerationResult: ChapterGenerationResponse | null
   availableVersions: ChapterVersion[]
+  groupedVersions: VersionGroup[]
   selectedVersionIndex: number
   evaluatingChapter: number | null
   isSelectingVersion?: boolean

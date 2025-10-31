@@ -64,6 +64,7 @@
           :chapter-generation-result="chapterGenerationResult"
           :selected-version-index="selectedVersionIndex"
           :available-versions="availableVersions"
+          :grouped-versions="groupedVersions"
           :is-selecting-version="isSelectingVersion"
           @regenerate-chapter="regenerateChapter"
           @evaluate-chapter="evaluateChapter"
@@ -263,50 +264,46 @@ const hasChapterInProgress = (chapterNumber: number) => {
 
 // 可用版本列表 (合并生成结果和已有版本)
 const availableVersions = computed(() => {
-  // 优先使用新生成的版本（对象数组格式）
-  if (chapterGenerationResult.value?.versions) {
-    console.log('使用生成结果版本:', chapterGenerationResult.value.versions)
-    return chapterGenerationResult.value.versions
-  }
-
-  // 使用章节已有的版本（字符串数组格式，需要转换为对象数组）
-  if (selectedChapter.value?.versions && Array.isArray(selectedChapter.value.versions)) {
-    console.log('原始章节版本 (字符串数组):', selectedChapter.value.versions)
-
-    // 将字符串数组转换为ChapterVersion对象数组
-    const convertedVersions = selectedChapter.value.versions.map((versionString, index) => {
-      console.log(`版本 ${index} 原始字符串:`, versionString)
-
-      try {
-        // 解析JSON字符串
-        const versionObj = JSON.parse(versionString)
-        console.log(`版本 ${index} 解析后的对象:`, versionObj)
-
-        // 提取content字段作为实际内容
-        const actualContent = versionObj.content || versionString
-
-        console.log(`版本 ${index} 实际内容:`, actualContent.substring(0, 100) + '...')
-
-        return {
-          content: actualContent,
-          style: '标准' // 默认风格
-        }
-      } catch (error) {
-        // 如果JSON解析失败，直接使用原始字符串
-        console.log(`版本 ${index} JSON解析失败，使用原始字符串:`, error)
-        return {
-          content: versionString,
-          style: '标准'
-        }
+  const normalize = (version: any): ChapterVersion => {
+    if (typeof version === 'string') {
+      return {
+        content: version,
+        metadata: {},
+        provider: 'legacy',
+        label: undefined
       }
-    })
-
-    console.log('转换后的版本对象:', convertedVersions)
-    return convertedVersions
+    }
+    return {
+      content: version.content || '',
+      metadata: version.metadata || {},
+      provider: version.provider,
+      label: version.label
+    }
   }
 
-  console.log('没有可用版本，selectedChapter:', selectedChapter.value)
+  if (chapterGenerationResult.value?.versions) {
+    return chapterGenerationResult.value.versions.map(normalize)
+  }
+
+  if (selectedChapter.value?.versions && Array.isArray(selectedChapter.value.versions)) {
+    return selectedChapter.value.versions.map(normalize)
+  }
+
   return []
+})
+
+const groupedVersions = computed(() => {
+  const groups = new Map<string, { modelKey: string; modelName: string; provider?: string | null; items: Array<{ version: ChapterVersion; globalIndex: number }> }>()
+  availableVersions.value.forEach((version, index) => {
+    const metadata = version.metadata || {}
+    const modelKey = metadata.model_key || version.provider || 'primary'
+    const modelName = metadata.model_name || version.label || (modelKey === 'primary' ? '主模型' : modelKey)
+    if (!groups.has(modelKey)) {
+      groups.set(modelKey, { modelKey, modelName, provider: version.provider, items: [] })
+    }
+    groups.get(modelKey)!.items.push({ version, globalIndex: index })
+  })
+  return Array.from(groups.values())
 })
 
 

@@ -2,7 +2,11 @@ name: Build and Publish Docker Image
 
 on:
   workflow_dispatch:
-
+    inputs:
+      tag:
+        description: 'Image tag (e.g., 1.0.0, dev, latest)' # 描述，显示在UI上
+        required: true                                     # 是否必填
+        default: 'latest'                                  # 默认值，如果用户不输入则使用这个
 env:
   DOCKERFILE_PATH: deploy/Dockerfile
 
@@ -37,4 +41,6 @@ jobs:
           context: .
           file: ${{ env.DOCKERFILE_PATH }}
           push: true
-          tags: ${{ env.IMAGE_NAME }}:latest
+          # 修改这里：将用户输入的 tag 添加到 IMAGE_NAME 后面
+          tags: ${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}          
+          # tags: ${{ env.IMAGE_NAME }}:latest

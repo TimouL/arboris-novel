@@ -44,6 +44,7 @@ class LLMService:
         user_id: Optional[int] = None,
         timeout: float = 300.0,
         response_format: Optional[str] = "json_object",
+        override_config: Optional[Dict[str, Optional[str]]] = None,
     ) -> str:
         messages = [{"role": "system", "content": system_prompt}, *conversation_history]
         return await self._stream_and_collect(
@@ -52,6 +53,7 @@ class LLMService:
             user_id=user_id,
             timeout=timeout,
             response_format=response_format,
+            override_config=override_config,
         )
 
     async def get_summary(
@@ -83,8 +85,15 @@ class LLMService:
         user_id: Optional[int],
         timeout: float,
         response_format: Optional[str] = None,
+        override_config: Optional[Dict[str, Optional[str]]] = None,
     ) -> str:
         config = await self._resolve_llm_config(user_id)
+        if override_config:
+            config = {
+                "api_key": override_config.get("api_key") or config.get("api_key"),
+                "base_url": override_config.get("base_url") or config.get("base_url"),
+                "model": override_config.get("model") or config.get("model"),
+            }
         client = LLMClient(api_key=config["api_key"], base_url=config.get("base_url"))
 
         chat_messages = [ChatMessage(role=msg["role"], content=msg["content"]) for msg in messages]
