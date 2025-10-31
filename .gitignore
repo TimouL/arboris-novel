@@ -30,3 +30,5 @@ plan/
 .venv310/
 .venv311/
 .venv313/
+backend/requirements-dev.txt
+backend/tests/
