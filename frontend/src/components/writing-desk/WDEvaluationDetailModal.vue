@@ -26,7 +26,8 @@
         <div v-if="parsedEvaluation" class="space-y-6 text-sm">
             <div class="bg-purple-50 border border-purple-200 rounded-xl p-4">
               <p class="font-semibold text-purple-800 text-base">🏆 最佳选择：版本 {{ parsedEvaluation.best_choice }}</p>
-              <p class="text-purple-700 mt-2">{{ parsedEvaluation.reason_for_choice }}</p>
+              <p v-if="evaluationTimeLabel" class="text-xs text-purple-600 mt-1">评审时间：{{ evaluationTimeLabel }}</p>
+              <p class="text-purple-700 mt-2 whitespace-pre-line">{{ parsedEvaluation.reason_for_choice }}</p>
             </div>
             <div class="space-y-4">
               <div v-for="(evalResult, versionName) in parsedEvaluation.evaluation" :key="versionName" class="bg-gray-50 p-4 rounded-lg border border-gray-200">
@@ -55,8 +56,10 @@
           <div 
             v-else
             class="prose prose-sm max-w-none prose-headings:mt-2 prose-headings:mb-1 prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 text-gray-800"
-            v-html="parseMarkdown(evaluation)"
-          ></div>
+          >
+            <p v-if="evaluationTimeLabel" class="text-xs text-purple-600 mb-2">评审时间：{{ evaluationTimeLabel }}</p>
+            <div v-html="parseMarkdown(evaluation)"></div>
+          </div>
       </div>
 
       <!-- 弹窗底部操作按钮 -->
@@ -78,26 +81,107 @@ import { computed } from 'vue'
 interface Props {
   show: boolean
   evaluation: string | null
+  evaluationTime: string | null
 }
 
 const props = defineProps<Props>()
 
 defineEmits(['close'])
+ 
+const shanghaiFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false
+})
+
+const parseToDate = (value: string): Date | null => {
+  const raw = value?.trim()
+  if (!raw) {
+    return null
+  }
+  const hasTimezone = /(Z|[+-]\d{2}:?\d{2})$/.test(raw)
+  let normalized = raw
+  if (!hasTimezone) {
+    normalized = raw.includes('T') ? raw : raw.replace(' ', 'T')
+    normalized += 'Z'
+  }
+  const date = new Date(normalized)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+  return date
+}
+
+const formatDateTime = (value: string): string => {
+  const date = parseToDate(value)
+  if (!date) {
+    return value
+  }
+  const parts = shanghaiFormatter.formatToParts(date)
+  const pick = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? ''
+  return `${pick('year')}-${pick('month')}-${pick('day')} ${pick('hour')}:${pick('minute')}:${pick('second')}`
+}
 
 const parsedEvaluation = computed(() => {
   if (!props.evaluation) return null
+  const rawText = props.evaluation.trim()
   try {
-    // First, try to parse the whole string as JSON
-    let data = JSON.parse(props.evaluation);
-    // If successful and it's a string, parse it again (for double-encoded JSON)
-    if (typeof data === 'string') {
-      data = JSON.parse(data);
+    let cleaned = rawText
+    const fenceMatch = cleaned.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+    if (fenceMatch) {
+      cleaned = fenceMatch[1].trim()
     }
-    return data;
+    let data = JSON.parse(cleaned)
+    if (typeof data === 'string') {
+      data = JSON.parse(data)
+    }
+    if (data && typeof data === 'object') {
+      const obj = data as Record<string, any>
+      if (typeof obj.reason_for_choice === 'string') {
+        obj.reason_for_choice = obj.reason_for_choice.split('\\n').join('\n').trim()
+      }
+      if (typeof obj.eva_time === 'string') {
+        obj.eva_time = obj.eva_time.trim()
+      }
+      if (obj.evaluation && typeof obj.evaluation === 'object') {
+        Object.values(obj.evaluation).forEach((entry: any) => {
+          if (!entry || typeof entry !== 'object') return
+          if (typeof entry.overall_review === 'string') {
+            entry.overall_review = entry.overall_review.split('\\n').join('\n').trim()
+          }
+          ;['pros', 'cons'].forEach((field) => {
+            if (Array.isArray(entry[field])) {
+              entry[field] = entry[field].map((item: any) =>
+                typeof item === 'string' ? item.split('\\n').join('\n').trim() : item
+              )
+            }
+          })
+        })
+      }
+    }
+    return data
   } catch (error) {
-    console.error('Failed to parse evaluation JSON:', error)
+    console.error('Failed to parse evaluation JSON:', error, rawText)
     return null
   }
+})
+
+const evaluationTimeLabel = computed(() => {
+  const directTime = props.evaluationTime?.trim()
+  if (directTime) {
+    return formatDateTime(directTime)
+  }
+  const parsed = parsedEvaluation.value as Record<string, any> | null
+  if (parsed && typeof parsed === 'object' && parsed.eva_time) {
+    return formatDateTime(String(parsed.eva_time))
+  }
+  return null
 })
 
 const parseMarkdown = (text: string | null): string => {

@@ -15,6 +15,13 @@ from ...schemas.admin import (
     UpdateLogCreate,
     UpdateLogRead,
     UpdateLogUpdate,
+    VectorChapterBatchRequest,
+    VectorChapterDetailResponse,
+    VectorChapterListResponse,
+    VectorOperationResult,
+    VectorProjectListResponse,
+    VectorRetrievalTestRequest,
+    VectorRetrievalTestResponse,
 )
 from ...schemas.config import SystemConfigCreate, SystemConfigRead, SystemConfigUpdate
 from ...schemas.prompt import PromptCreate, PromptRead, PromptUpdate
@@ -29,6 +36,7 @@ from ...services.auth_service import AuthService
 from ...services.admin_setting_service import AdminSettingService
 from ...services.config_service import ConfigService
 from ...services.novel_service import NovelService
+from ...services.vector_management_service import VectorManagementService
 from ...services.prompt_service import PromptService
 from ...services.update_log_service import UpdateLogService
 from ...services.user_service import UserService
@@ -64,6 +72,9 @@ def get_user_service(session: AsyncSession = Depends(get_session)) -> UserServic
 def get_auth_service(session: AsyncSession = Depends(get_session)) -> AuthService:
     return AuthService(session)
 
+
+def get_vector_management_service(session: AsyncSession = Depends(get_session)) -> VectorManagementService:
+    return VectorManagementService(session)
 
 @router.get("/stats", response_model=Statistics)
 async def read_statistics(
@@ -328,6 +339,69 @@ async def delete_system_config(
         logger.warning("系统配置 %s 不存在，无法删除", key)
         raise HTTPException(status_code=404, detail="配置项不存在")
     logger.info("管理员删除系统配置：%s", key)
+
+
+@router.get("/vector/projects", response_model=VectorProjectListResponse)
+async def list_vector_projects(
+    service: VectorManagementService = Depends(get_vector_management_service),
+    _: None = Depends(get_current_admin),
+) -> VectorProjectListResponse:
+    logger.info("管理员查看向量库项目概况")
+    return await service.list_projects()
+
+
+@router.get("/vector/projects/{project_id}/chapters", response_model=VectorChapterListResponse)
+async def list_vector_project_chapters(
+    project_id: str,
+    service: VectorManagementService = Depends(get_vector_management_service),
+    _: None = Depends(get_current_admin),
+) -> VectorChapterListResponse:
+    logger.info("管理员查看项目 %s 的向量章节列表", project_id)
+    return await service.list_project_chapters(project_id)
+
+
+@router.get("/vector/projects/{project_id}/chapters/{chapter_number}", response_model=VectorChapterDetailResponse)
+async def get_vector_chapter_detail(
+    project_id: str,
+    chapter_number: int,
+    service: VectorManagementService = Depends(get_vector_management_service),
+    _: None = Depends(get_current_admin),
+) -> VectorChapterDetailResponse:
+    logger.info("管理员查看项目 %s 第 %s 章向量详情", project_id, chapter_number)
+    return await service.get_chapter_detail(project_id, chapter_number)
+
+
+@router.post("/vector/projects/{project_id}/chapters/reingest", response_model=VectorOperationResult)
+async def reingest_vector_chapters(
+    project_id: str,
+    payload: VectorChapterBatchRequest,
+    service: VectorManagementService = Depends(get_vector_management_service),
+    current_admin=Depends(get_current_admin),
+) -> VectorOperationResult:
+    logger.info("管理员触发向量重建：项目=%s 章节=%s", project_id, payload.chapter_numbers)
+    return await service.reingest_chapters(project_id, payload.chapter_numbers, user_id=current_admin.id)
+
+
+@router.post("/vector/projects/{project_id}/chapters/delete", response_model=VectorOperationResult)
+async def delete_vector_chapters(
+    project_id: str,
+    payload: VectorChapterBatchRequest,
+    service: VectorManagementService = Depends(get_vector_management_service),
+    _: None = Depends(get_current_admin),
+) -> VectorOperationResult:
+    logger.info("管理员删除章节向量：项目=%s 章节=%s", project_id, payload.chapter_numbers)
+    return await service.delete_chapters(project_id, payload.chapter_numbers)
+
+
+@router.post("/vector/projects/{project_id}/retrieval-test", response_model=VectorRetrievalTestResponse)
+async def test_vector_retrieval(
+    project_id: str,
+    payload: VectorRetrievalTestRequest,
+    service: VectorManagementService = Depends(get_vector_management_service),
+    current_admin=Depends(get_current_admin),
+) -> VectorRetrievalTestResponse:
+    logger.info("管理员测试向量检索：项目=%s", project_id)
+    return await service.test_retrieval(project_id, payload, user_id=current_admin.id)
 
 
 @router.post("/password", status_code=status.HTTP_204_NO_CONTENT)

@@ -16,6 +16,12 @@ export interface LLMConfigCreate {
   llm_provider_model?: string;
 }
 
+export interface LLMConfigTestResponse {
+  success: boolean;
+  message: string;
+  sample?: string | null;
+}
+
 const getHeaders = () => {
   const authStore = useAuthStore();
   return {
@@ -58,4 +64,16 @@ export const deleteLLMConfig = async (): Promise<void> => {
   if (!response.ok) {
     throw new Error('Failed to delete LLM config');
   }
+};
+
+export const testLLMConfig = async (config: LLMConfigCreate): Promise<LLMConfigTestResponse> => {
+  const response = await fetch(`${LLM_BASE}/test`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to test LLM config');
+  }
+  return response.json();
 };

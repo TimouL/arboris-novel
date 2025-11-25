@@ -10,23 +10,21 @@
         <h3 class="text-lg font-semibold text-indigo-800">多模型写作</h3>
         <p class="text-sm text-indigo-600">开启后，所选附加模型将在生成章节时与主模型一同调用。</p>
       </div>
-      <label class="inline-flex items-center cursor-pointer">
-        <input type="checkbox" class="sr-only" v-model="localSettings.enabled">
-        <span class="w-14 h-8 bg-gray-200 rounded-full transition" :class="localSettings.enabled ? 'bg-indigo-500' : 'bg-gray-200'"></span>
-        <span class="ml-3 text-sm text-gray-700">{{ localSettings.enabled ? '已启用' : '已关闭' }}</span>
-      </label>
-    </div>
-
-    <div class="grid md:grid-cols-2 gap-4">
-      <label class="block">
-        <span class="text-sm font-medium text-gray-700">每模型默认生成版本数</span>
-        <input
-          type="number"
-          min="1"
-          max="10"
-          v-model.number="localSettings.fallback_variants"
-          class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+      <label class="inline-flex items-center cursor-pointer select-none">
+        <input type="checkbox" class="sr-only peer" v-model="localSettings.enabled">
+        <span
+          class="relative inline-flex w-16 h-9 rounded-full bg-gray-200 transition-colors duration-200 peer-focus:outline peer-focus:outline-2 peer-focus:outline-indigo-200 peer-checked:bg-indigo-500"
         >
+          <span
+            class="absolute top-1 left-1 h-7 w-7 rounded-full bg-white shadow-sm transition-transform duration-200 ease-out peer-checked:translate-x-7"
+          ></span>
+        </span>
+        <span
+          class="ml-3 text-sm font-medium transition-colors duration-200"
+          :class="localSettings.enabled ? 'text-indigo-600' : 'text-gray-600'"
+        >
+          {{ localSettings.enabled ? '已启用' : '已关闭' }}
+        </span>
       </label>
     </div>
 
@@ -81,7 +79,21 @@
           </label>
           <label class="block text-sm">
             <span class="text-gray-700">模型 ID</span>
-            <input v-model.trim="model.model" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500" placeholder="如 claude-3-5-sonnet">
+            <div class="mt-1 flex gap-2">
+              <input
+                v-model.trim="model.model"
+                class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="如 claude-3-5-sonnet"
+              >
+              <button
+                type="button"
+                class="px-3 py-2 text-sm font-medium text-white bg-emerald-500 rounded-md hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                @click="testConnection(model, index)"
+                :disabled="testingIndex === index || !model.model"
+              >
+                {{ testingIndex === index ? '测试中...' : '测试连接' }}
+              </button>
+            </div>
           </label>
           <label class="block text-sm">
             <span class="text-gray-700">Base URL（可选）</span>
@@ -126,9 +138,9 @@ import { AdminAPI, type WritingModelSettings, type WritingModelConfig } from '@/
 
 const loading = ref(false)
 const saving = ref(false)
+const testingIndex = ref<number | null>(null)
 const localSettings = reactive<WritingModelSettings>({
   enabled: false,
-  fallback_variants: 3,
   models: []
 })
 
@@ -147,10 +159,26 @@ const loadSettings = async () => {
   }
 }
 
+const normalizeVariants = (value: WritingModelConfig['variants']) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return undefined
+  }
+  const rounded = Math.round(value)
+  if (rounded < 1) {
+    return undefined
+  }
+  if (rounded > 10) {
+    return 10
+  }
+  return rounded
+}
+
 const applySettings = (settings: WritingModelSettings) => {
   localSettings.enabled = settings.enabled
-  localSettings.fallback_variants = settings.fallback_variants
-  localSettings.models = settings.models.map(model => ({ ...model }))
+  localSettings.models = settings.models.map(model => ({
+    ...model,
+    variants: normalizeVariants(model.variants) ?? null
+  }))
 }
 
 const addModel = () => {
@@ -163,7 +191,7 @@ const addModel = () => {
     base_url: '',
     api_key: '',
     temperature: 0.9,
-    variants: 2,
+    variants: null,
     enabled: true
   }
   localSettings.models.push(newModel)
@@ -184,13 +212,12 @@ const save = async () => {
     saving.value = true
     const payload: WritingModelSettings = {
       enabled: localSettings.enabled,
-      fallback_variants: Math.max(1, localSettings.fallback_variants || 1),
       models: localSettings.models.map(model => ({
         ...model,
-        variants: Math.max(1, model.variants || 1),
+        variants: normalizeVariants(model.variants),
         temperature: typeof model.temperature === 'number' ? model.temperature : 0.9,
-        base_url: model.base_url || '',
-        api_key: model.api_key || ''
+        base_url: model.base_url?.trim() || '',
+        api_key: model.api_key?.trim() || ''
       }))
     }
     const updated = await AdminAPI.updateWritingModelSettings(payload)
@@ -201,6 +228,37 @@ const save = async () => {
     alert(error?.message || '保存失败，请稍后重试')
   } finally {
     saving.value = false
+  }
+}
+
+const testConnection = async (model: WritingModelConfig, index: number) => {
+  if (!model.model?.trim()) {
+    alert('请先填写模型 ID')
+    return
+  }
+  if (testingIndex.value !== null) {
+    return
+  }
+
+  try {
+    testingIndex.value = index
+    const payload = {
+      model: model.model.trim(),
+      base_url: model.base_url?.trim() || undefined,
+      api_key: model.api_key?.trim() || undefined,
+      temperature: typeof model.temperature === 'number' ? model.temperature : 0.9
+    }
+    const result = await AdminAPI.testWritingModelConnection(payload)
+    if (result.success) {
+      const sample = result.sample ? `\n示例返回：${result.sample}` : ''
+      alert(`连接成功：${result.message}${sample}`)
+    } else {
+      alert(`连接失败：${result.message}`)
+    }
+  } catch (error: any) {
+    alert(error?.message || '测试失败，请稍后重试')
+  } finally {
+    testingIndex.value = null
   }
 }
 

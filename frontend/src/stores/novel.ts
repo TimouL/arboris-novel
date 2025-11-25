@@ -143,14 +143,25 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
-  async function generateChapter(chapterNumber: number): Promise<NovelProject> {
+  async function generateChapter(
+    chapterNumber: number,
+    modelKeys?: string[] | null,
+    errorStrategy: 'stop' | 'continue' = 'stop',
+    formatCleanup?: boolean
+  ): Promise<NovelProject> {
     // 注意：这里不设置全局 isLoading，因为 WritingDesk.vue 有自己的局部加载状态
     error.value = null
     try {
       if (!currentProject.value) {
         throw new Error('没有当前项目')
       }
-      const updatedProject = await NovelAPI.generateChapter(currentProject.value.id, chapterNumber)
+      const updatedProject = await NovelAPI.generateChapter(
+        currentProject.value.id,
+        chapterNumber,
+        modelKeys,
+        errorStrategy,
+        formatCleanup
+      )
       currentProject.value = updatedProject // 更新 store 中的当前项目
       return updatedProject
     } catch (err) {
@@ -282,6 +293,32 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
+  async function getChapterGenerationProgress(chapterNumber: number) {
+    error.value = null
+    try {
+      if (!currentProject.value) {
+        throw new Error('没有当前项目')
+      }
+      return await NovelAPI.getChapterGenerationProgress(currentProject.value.id, chapterNumber)
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '获取模型进度失败'
+      throw err
+    }
+  }
+
+  async function stopModelGeneration(chapterNumber: number, modelKey: string) {
+    error.value = null
+    try {
+      if (!currentProject.value) {
+        throw new Error('没有当前项目')
+      }
+      await NovelAPI.stopModelGeneration(currentProject.value.id, chapterNumber, modelKey)
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '停止模型失败'
+      throw err
+    }
+  }
+
   function clearError() {
     error.value = null
   }
@@ -316,6 +353,8 @@ export const useNovelStore = defineStore('novel', () => {
     deleteChapter,
     generateChapterOutline,
     editChapterContent,
+    getChapterGenerationProgress,
+    stopModelGeneration,
     clearError,
     setCurrentProject
   }

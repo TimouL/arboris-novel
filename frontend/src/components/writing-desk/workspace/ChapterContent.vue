@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+    <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-4">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2 text-green-800">
           <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -24,32 +24,21 @@
     </div>
 
     <div class="bg-gray-50 rounded-xl p-6">
-      <div class="flex items-center justify-between mb-4 gap-3">
-        <div>
-          <h4 class="font-semibold text-gray-800">章节内容</h4>
-          <p v-if="currentVersionInfo" class="text-xs text-gray-500 mt-1">
-            当前版本由 {{ currentVersionInfo.modelName }} 生成
-          </p>
-        </div>
-        <div class="flex items-center gap-3">
-          <div class="text-sm text-gray-500">
-            约 {{ Math.round(cleanVersionContent(selectedChapter.content || '').length / 100) * 100 }} 字
-          </div>
-          <button
-            class="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors duration-200"
-            :class="selectedChapter.content ? 'border-indigo-200 text-indigo-600 hover:bg-indigo-50' : 'border-gray-200 text-gray-400 cursor-not-allowed'"
-            :disabled="!selectedChapter.content"
-            @click="exportChapterAsTxt(selectedChapter)"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v16h16V4m-4 4l-4-4-4 4m4-4v12" />
-            </svg>
-            导出TXT
-          </button>
-        </div>
+      <div class="mb-4">
+        <h4 class="font-semibold text-gray-800">章节内容</h4>
       </div>
+
       <div class="prose max-w-none">
-        <div class="whitespace-pre-wrap text-gray-700 leading-relaxed">{{ cleanVersionContent(selectedChapter.content || '') }}</div>
+        <div class="whitespace-pre-wrap text-gray-700 leading-relaxed">
+          <template v-if="highlightedSegments && highlightedSegments.length">
+            <template v-for="(seg, idx) in highlightedSegments" :key="idx">
+              <span :class="segmentClass(seg.label)">{{ seg.text }}</span>
+            </template>
+          </template>
+          <template v-else>
+            {{ cleanContent }}
+          </template>
+        </div>
       </div>
     </div>
   </div>
@@ -57,14 +46,42 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Chapter } from '@/api/novel'
+import type { Chapter, AIDetectionSegment } from '@/api/novel'
+import type { DetectionState } from '@/stores/aiDetection'
 
 interface Props {
   selectedChapter: Chapter
+  detectionState?: DetectionState
 }
 
 const props = defineProps<Props>()
 const selectedChapter = computed(() => props.selectedChapter)
+const cleanContent = computed(() => cleanVersionContent(selectedChapter.value.content || ''))
+type HighlightSegment = { text: string; label: number | null }
+
+const hashString = (value: string): string => {
+  let hash = 0
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0
+  }
+  return hash.toString(16)
+}
+
+const detectionUsable = computed(() => {
+  const state = props.detectionState
+  if (!state || state.status !== 'success') return false
+  const contentHash = hashString(cleanContent.value)
+  if (state.content_hash && state.content_hash !== contentHash) return false
+  return true
+})
+
+const highlightedSegments = computed<HighlightSegment[] | null>(() => {
+  const state = props.detectionState
+  if (!detectionUsable.value || !state || !state.segments?.length) return null
+  const content = cleanContent.value
+  if (!content) return null
+  return buildSegments(content, state.segments)
+})
 
 defineEmits(['showVersionSelector'])
 
@@ -86,35 +103,36 @@ const cleanVersionContent = (content: string): string => {
   return cleaned
 }
 
-const sanitizeFileName = (name: string): string => {
-  return name.replace(/[\\/:*?"<>|]/g, '_')
-}
 
-const exportChapterAsTxt = (chapter?: Chapter | null) => {
-  if (!chapter) return
+const buildSegments = (content: string, segments: AIDetectionSegment[]): HighlightSegment[] | null => {
+  const parts: HighlightSegment[] = []
+  let cursor = 0
 
-  const title = chapter.title?.trim() || `第${chapter.chapter_number}章`
-  const safeTitle = sanitizeFileName(title) || `chapter-${chapter.chapter_number}`
-  const content = cleanVersionContent(chapter.content || '')
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${safeTitle}.txt`
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-}
-
-const currentVersionInfo = computed(() => {
-  if (!props.selectedChapter?.content || !props.selectedChapter.versions) return null
-  const target = cleanVersionContent(props.selectedChapter.content)
-  const match = props.selectedChapter.versions.find(version => cleanVersionContent(version.content).trim() === target.trim())
-  if (!match) return null
-  const metadata = match.metadata || {}
-  return {
-    modelName: metadata.model_name || match.label || (metadata.source === 'addon' ? metadata.model_key : '主模型')
+  for (const seg of segments) {
+    const text = seg.text || ''
+    if (!text) continue
+    const idx = content.indexOf(text, cursor)
+    if (idx === -1) {
+      return null
+    }
+    if (idx > cursor) {
+      parts.push({ text: content.slice(cursor, idx), label: null })
+    }
+    parts.push({ text, label: seg.label })
+    cursor = idx + text.length
   }
-})
+
+  if (cursor < content.length) {
+    parts.push({ text: content.slice(cursor), label: null })
+  }
+
+  return parts
+}
+
+const segmentClass = (label: number | null) => {
+  if (label === 1) return 'bg-red-100'
+  if (label === 2) return 'bg-amber-100'
+  if (label === 0) return 'bg-emerald-100'
+  return ''
+}
 </script>

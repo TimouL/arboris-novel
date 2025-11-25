@@ -179,3 +179,19 @@ CREATE TABLE IF NOT EXISTS update_logs (
     created_by VARCHAR(64) NULL,
     is_pinned TINYINT(1) DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS ai_detection_results (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    project_id CHAR(36) NOT NULL,
+    chapter_number INT NOT NULL,
+    status VARCHAR(16) DEFAULT 'success',
+    confidence DECIMAL(10,6) NULL,
+    available_uses INT NULL,
+    segments JSON NULL,
+    text_hash VARCHAR(128) NULL,
+    content_hash VARCHAR(128) NULL,
+    error_message VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_detection_project_chapter (project_id, chapter_number)
+);

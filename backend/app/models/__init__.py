@@ -19,6 +19,7 @@ from .usage_metric import UsageMetric
 from .user import User
 from .user_daily_request import UserDailyRequest
 from .system_config import SystemConfig
+from .ai_detection_result import AIDetectionResult
 
 __all__ = [
     "AdminSetting",
@@ -38,4 +39,5 @@ __all__ = [
     "User",
     "UserDailyRequest",
     "SystemConfig",
+    "AIDetectionResult",
 ]

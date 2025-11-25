@@ -190,6 +190,9 @@ watch(
 }
 
 .admin-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(8px);
   padding: 0 20px;

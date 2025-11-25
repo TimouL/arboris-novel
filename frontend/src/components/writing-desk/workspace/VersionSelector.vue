@@ -83,23 +83,11 @@
 
     <!-- 版本选择器 -->
     <div class="bg-gray-50 rounded-xl p-4">
-      <div class="flex items-center justify-between mb-4">
+      <div class="mb-4 flex items-center justify-between">
         <h4 class="font-semibold text-gray-800">
           {{ availableVersions.length > 1 ? '选择版本' : '生成内容' }}
-          <span class="text-sm font-normal text-gray-600 ml-2">({{ availableVersions.length }} 个版本)</span>
+          <span class="ml-2 text-sm font-normal text-gray-600">({{ availableVersions.length }} 个版本)</span>
         </h4>
-        <!-- <button
-          @click="$emit('confirmVersionSelection')"
-          :disabled="!availableVersions?.[selectedVersionIndex]?.content || isCurrentVersion(selectedVersionIndex) || isSelectingVersion"
-          class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-        >
-          <svg v-if="isSelectingVersion" class="w-5 h-5 animate-spin" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
-          </svg>
-          <span v-else>
-            {{ isCurrentVersion(selectedVersionIndex) ? '当前版本' : '确认选择此版本' }}
-          </span>
-        </button> -->
       </div>
 
       <div class="space-y-4">
@@ -150,12 +138,21 @@
                   <p class="text-sm text-gray-700 line-clamp-3">
                     {{ cleanVersionContent(item.version.content).substring(0, 150) }}...
                   </p>
-                  <div class="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                  <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
                     <span>约 {{ Math.round(cleanVersionContent(item.version.content).length / 100) * 100 }} 字</span>
                     <span v-if="item.version.label">• {{ item.version.label }}</span>
+                    <span
+                      v-if="isManualVersion(item.version)"
+                      class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-amber-700"
+                    >
+                      <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M17.414 2.586a2 2 0 010 2.828l-8.475 8.475a2 2 0 01-.878.512l-3.447.985a1 1 0 01-1.213-1.213l.985-3.447a2 2 0 01.512-.878l8.475-8.475a2 2 0 012.828 0z" />
+                      </svg>
+                      人工稿
+                    </span>
                     <span v-if="isCurrentVersion(item.globalIndex)" class="text-green-600 font-medium">• 当前选中</span>
                   </div>
-                  <div class="mt-2">
+                  <div class="mt-2 flex flex-wrap items-center gap-3">
                     <button
                       @click.stop="$emit('showVersionDetail', item.globalIndex)"
                       class="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
@@ -166,6 +163,17 @@
                       </svg>
                       查看详情
                     </button>
+                    <button
+                      v-if="isManualVersion(item.version)"
+                      @click.stop="$emit('edit-manual-version', { version: item.version, index: item.globalIndex })"
+                      class="text-xs text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1"
+                    >
+                      <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-7.9 7.9a2 2 0 01-.878.512l-3.447.985a1 1 0 01-1.213-1.213l.985-3.447a2 2 0 01.512-.878l7.9-7.9z"></path>
+                        <path d="M5 13l4 4H5v-4z"></path>
+                      </svg>
+                      继续编辑
+                    </button>
                   </div>
                 </div>
               </div>
@@ -174,7 +182,7 @@
         </section>
       </div>
 
-      <div class="mt-4 flex justify-end items-center gap-4">
+      <div class="mt-4 flex flex-wrap justify-end items-center gap-4">
         <button
           @click="$emit('evaluateChapter')"
           :disabled="evaluatingChapter === selectedChapter?.chapter_number || availableVersions.length < 2"
@@ -203,7 +211,6 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import type { Chapter, ChapterGenerationResponse, ChapterVersion } from '@/api/novel'
 
 interface VersionGroup {
@@ -226,14 +233,28 @@ interface Props {
 
 const props = defineProps<Props>()
 
-defineEmits(['hideVersionSelector', 'update:selectedVersionIndex', 'showVersionDetail', 'confirmVersionSelection', 'evaluateChapter', 'showEvaluationDetail'])
-
+defineEmits([
+  'hideVersionSelector',
+  'update:selectedVersionIndex',
+  'showVersionDetail',
+  'confirmVersionSelection',
+  'evaluateChapter',
+  'showEvaluationDetail',
+  'edit-manual-version'
+])
 
 const isCurrentVersion = (versionIndex: number) => {
   if (!props.selectedChapter?.content || !props.availableVersions?.[versionIndex]?.content) return false
   const cleanCurrentContent = cleanVersionContent(props.selectedChapter.content)
   const cleanVersionContentStr = cleanVersionContent(props.availableVersions[versionIndex].content)
   return cleanCurrentContent === cleanVersionContentStr
+}
+
+
+const isManualVersion = (version: ChapterVersion) => {
+  const metadata = (version.metadata || {}) as Record<string, any>
+  const source = typeof metadata.source === 'string' ? metadata.source : version.provider
+  return source === 'manual'
 }
 
 const cleanVersionContent = (content: string): string => {

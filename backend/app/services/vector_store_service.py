@@ -11,6 +11,7 @@ import logging
 import math
 from array import array
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -53,18 +54,25 @@ class VectorStoreService:
             logger.warning("未开启向量库配置，RAG 检索将被跳过。")
             self._client = None
             self._schema_ready = True
+            self._local_path: Optional[Path] = None
             return
 
         if libsql_client is None:  # pragma: no cover - 运行环境缺少依赖
             raise RuntimeError("缺少 libsql-client 依赖，请先在环境中安装。")
 
         url = settings.vector_db_url
+        self._local_path: Optional[Path] = None
         if url and url.startswith("file:"):
             path_part = url.split("file:", 1)[1]
-            resolved = Path(path_part).expanduser().resolve()
+            # 使用项目根目录作为相对路径基准，避免因工作目录变化导致读到错误的向量库
+            proj_root_candidates = Path(__file__).resolve().parents
+            base_root = proj_root_candidates[3] if len(proj_root_candidates) > 3 else proj_root_candidates[2]
+            raw_path = Path(path_part)
+            resolved = (base_root / raw_path).expanduser().resolve() if not raw_path.is_absolute() else raw_path.expanduser().resolve()
             resolved.parent.mkdir(parents=True, exist_ok=True)
             url = f"file:{resolved}"
             logger.info("向量库使用本地文件: %s", resolved)
+            self._local_path = resolved
 
         try:
             logger.info("初始化 libsql 客户端: url=%s", url)
@@ -251,6 +259,152 @@ class VectorStoreService:
             )
         return items
 
+    async def fetch_chunk_stats(self, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """聚合 chunk 数量与更新时间。"""
+        if not self._client:
+            return []
+        await self.ensure_schema()
+        condition = ""
+        params: Dict[str, Any] = {}
+        if project_id:
+            condition = "WHERE project_id = :project_id"
+            params["project_id"] = project_id
+        sql = f"""
+        SELECT
+            project_id,
+            chapter_number,
+            COUNT(*) AS chunk_count,
+            MAX(created_at) AS last_ingested_at
+        FROM rag_chunks
+        {condition}
+        GROUP BY project_id, chapter_number
+        """
+        result = await self._client.execute(sql, params)  # type: ignore[union-attr]
+        stats: List[Dict[str, Any]] = []
+        for row in self._iter_rows(result):
+            stats.append(
+                {
+                    "project_id": row.get("project_id"),
+                    "chapter_number": row.get("chapter_number"),
+                    "chunk_count": row.get("chunk_count", 0),
+                    "last_ingested_at": self._unix_to_datetime(row.get("last_ingested_at")),
+                }
+            )
+        return stats
+
+    async def fetch_summary_stats(self, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """聚合摘要数量与更新时间。"""
+        if not self._client:
+            return []
+        await self.ensure_schema()
+        condition = ""
+        params: Dict[str, Any] = {}
+        if project_id:
+            condition = "WHERE project_id = :project_id"
+            params["project_id"] = project_id
+        sql = f"""
+        SELECT
+            project_id,
+            chapter_number,
+            COUNT(*) AS summary_count,
+            MAX(created_at) AS last_ingested_at
+        FROM rag_summaries
+        {condition}
+        GROUP BY project_id, chapter_number
+        """
+        result = await self._client.execute(sql, params)  # type: ignore[union-attr]
+        stats: List[Dict[str, Any]] = []
+        for row in self._iter_rows(result):
+            stats.append(
+                {
+                    "project_id": row.get("project_id"),
+                    "chapter_number": row.get("chapter_number"),
+                    "summary_count": row.get("summary_count", 0),
+                    "last_ingested_at": self._unix_to_datetime(row.get("last_ingested_at")),
+                }
+            )
+        return stats
+
+    async def fetch_chunks_detail(self, project_id: str, chapter_number: int) -> List[Dict[str, Any]]:
+        """获取指定章节 chunk 详情。"""
+        if not self._client:
+            return []
+        await self.ensure_schema()
+        sql = """
+        SELECT
+            chunk_index,
+            chapter_title,
+            content,
+            embedding,
+            metadata,
+            created_at
+        FROM rag_chunks
+        WHERE project_id = :project_id
+          AND chapter_number = :chapter_number
+        ORDER BY chunk_index
+        """
+        result = await self._client.execute(  # type: ignore[union-attr]
+            sql,
+            {"project_id": project_id, "chapter_number": chapter_number},
+        )
+        rows: List[Dict[str, Any]] = []
+        for row in self._iter_rows(result):
+            embedding_blob = row.get("embedding") or b""
+            if isinstance(embedding_blob, memoryview):
+                embedding_blob = embedding_blob.tobytes()
+            embedding_dim = len(embedding_blob) // 4 if embedding_blob else 0
+            rows.append(
+                {
+                    "chunk_index": row.get("chunk_index"),
+                    "chapter_title": row.get("chapter_title"),
+                    "content": row.get("content", ""),
+                    "embedding_dim": embedding_dim,
+                    "metadata": self._parse_metadata(row.get("metadata")),
+                    "created_at": self._unix_to_datetime(row.get("created_at")),
+                }
+            )
+        return rows
+
+    async def fetch_summary_detail(self, project_id: str, chapter_number: int) -> Optional[Dict[str, Any]]:
+        """获取章节摘要向量详情。"""
+        if not self._client:
+            return None
+        await self.ensure_schema()
+        sql = """
+        SELECT
+            title,
+            summary,
+            embedding,
+            created_at
+        FROM rag_summaries
+        WHERE project_id = :project_id
+          AND chapter_number = :chapter_number
+        LIMIT 1
+        """
+        result = await self._client.execute(  # type: ignore[union-attr]
+            sql,
+            {"project_id": project_id, "chapter_number": chapter_number},
+        )
+        row = next(iter(self._iter_rows(result)), None)
+        if not row:
+            return None
+        embedding_blob = row.get("embedding") or b""
+        if isinstance(embedding_blob, memoryview):
+            embedding_blob = embedding_blob.tobytes()
+        embedding_dim = len(embedding_blob) // 4 if embedding_blob else 0
+        return {
+            "title": row.get("title", ""),
+            "summary": row.get("summary", ""),
+            "embedding_dim": embedding_dim,
+            "created_at": self._unix_to_datetime(row.get("created_at")),
+        }
+
+    def get_storage_size(self) -> Optional[int]:
+        """返回向量库文件大小（仅 file: URL 可用）。"""
+        if self._local_path and self._local_path.exists():
+            return self._local_path.stat().st_size
+        return None
+
     async def upsert_chunks(
         self,
         *,
@@ -270,7 +424,8 @@ class VectorStoreService:
             chapter_title,
             content,
             embedding,
-            metadata
+            metadata,
+            created_at
         ) VALUES (
             :id,
             :project_id,
@@ -279,7 +434,8 @@ class VectorStoreService:
             :chapter_title,
             :content,
             :embedding,
-            :metadata
+            :metadata,
+            :created_at
         )
         ON CONFLICT(id) DO UPDATE SET
             content=excluded.content,
@@ -295,6 +451,7 @@ class VectorStoreService:
                     **item,
                     "embedding": self._to_f32_blob(embedding),
                     "metadata": json.dumps(item.get("metadata") or {}, ensure_ascii=False),
+                    "created_at": int(datetime.now(tz=timezone.utc).timestamp()),
                 }
             )
 
@@ -331,14 +488,16 @@ class VectorStoreService:
             chapter_number,
             title,
             summary,
-            embedding
+            embedding,
+            created_at
         ) VALUES (
             :id,
             :project_id,
             :chapter_number,
             :title,
             :summary,
-            :embedding
+            :embedding,
+            :created_at
         )
         ON CONFLICT(id) DO UPDATE SET
             summary=excluded.summary,
@@ -353,6 +512,7 @@ class VectorStoreService:
                 {
                     **item,
                     "embedding": self._to_f32_blob(embedding),
+                    "created_at": int(datetime.now(tz=timezone.utc).timestamp()),
                 }
             )
 
@@ -535,6 +695,22 @@ class VectorStoreService:
                 except Exception:  # pragma: no cover - 无法转换时跳过
                     continue
         return normalized
+
+    @staticmethod
+    def _unix_to_datetime(value: Any) -> Optional[datetime]:
+        """将 Unix 时间戳转换为 UTC datetime。"""
+        if value is None:
+            return None
+        try:
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, (bytes, bytearray)):
+                value = value.decode("utf-8")
+            if isinstance(value, str):
+                value = float(value)
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except Exception:
+            return None
 
 
 __all__ = [

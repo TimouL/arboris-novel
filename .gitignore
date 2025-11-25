@@ -30,5 +30,11 @@ plan/
 .venv310/
 .venv311/
 .venv313/
+.venv/
 backend/requirements-dev.txt
 backend/tests/
+tmp/
+AGENTS*.md
+task/done.md
+task/task.md
+node_modules

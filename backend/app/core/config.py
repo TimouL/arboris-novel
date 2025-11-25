@@ -39,6 +39,37 @@ class Settings(BaseSettings):
         description="访问令牌过期时间，单位分钟"
     )
 
+    # -------------------- AI 浓度检测配置 --------------------
+    ai_detection_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        env="AI_DETECTION_TIMEOUT_SECONDS",
+        description="AI 检测超时时间（秒）"
+    )
+    format_cleanup_enabled: bool = Field(
+        default=False,
+        env="FORMAT_CLEANUP_ENABLED",
+        description="章节落库前是否启用格式整理（解包 JSON 内容）"
+    )
+    ai_detection_min_length: int = Field(
+        default=350,
+        ge=1,
+        env="AI_DETECTION_MIN_LENGTH",
+        description="AI 检测允许的最小字符数"
+    )
+    ai_detection_max_length: int = Field(
+        default=20000,
+        ge=1,
+        env="AI_DETECTION_MAX_LENGTH",
+        description="AI 检测允许的最大字符数"
+    )
+    ai_detection_max_concurrency: int = Field(
+        default=2,
+        ge=1,
+        env="AI_DETECTION_MAX_CONCURRENCY",
+        description="AI 检测并发上限"
+    )
+
     # -------------------- 数据库配置 --------------------
     database_url: Optional[str] = Field(
         default=None,

@@ -64,23 +64,34 @@
       </div>
       <div>
         <label for="model" class="block text-sm font-medium text-gray-700">Model</label>
-        <div class="relative mt-1">
-          <input
-            type="text"
-            id="model"
-            v-model="config.llm_provider_model"
-            class="block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-            placeholder="留空则使用默认模型"
-          >
+        <div class="mt-1 flex gap-2">
+          <div class="relative flex-1">
+            <input
+              type="text"
+              id="model"
+              v-model="config.llm_provider_model"
+              class="block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              placeholder="留空则使用默认模型"
+            >
+            <button
+              type="button"
+              @click="clearApiModel"
+              class="absolute inset-y-0 right-2 flex items-center px-2 text-gray-400 hover:text-gray-600"
+              aria-label="清空模型名称"
+            >
+              <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+              </svg>
+            </button>
+          </div>
           <button
             type="button"
-            @click="clearApiModel"
-            class="absolute inset-y-0 right-2 flex items-center px-2 text-gray-400 hover:text-gray-600"
-            aria-label="清空模型名称"
+            class="px-4 py-2 bg-emerald-500 text-white rounded-md hover:bg-emerald-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            @click="handleTestConnection"
+            :disabled="testing"
           >
-            <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-            </svg>
+            <span v-if="testing">测试中...</span>
+            <span v-else>测试连接</span>
           </button>
         </div>
       </div>
@@ -94,7 +105,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { getLLMConfig, createOrUpdateLLMConfig, deleteLLMConfig, type LLMConfigCreate } from '@/api/llm';
+import { getLLMConfig, createOrUpdateLLMConfig, deleteLLMConfig, testLLMConfig, type LLMConfigCreate } from '@/api/llm';
 
 const config = ref<LLMConfigCreate>({
   llm_provider_url: '',
@@ -103,6 +114,7 @@ const config = ref<LLMConfigCreate>({
 });
 
 const showApiKey = ref(false);
+const testing = ref(false);
 
 onMounted(async () => {
   const existingConfig = await getLLMConfig();
@@ -146,5 +158,24 @@ const clearApiUrl = () => {
 
 const clearApiModel = () => {
   config.value.llm_provider_model = '';
+};
+
+const handleTestConnection = async () => {
+  if (testing.value) return;
+  testing.value = true;
+  try {
+    const payload: LLMConfigCreate = {
+      llm_provider_url: config.value.llm_provider_url?.trim() || undefined,
+      llm_provider_api_key: config.value.llm_provider_api_key?.trim() || undefined,
+      llm_provider_model: config.value.llm_provider_model?.trim() || undefined,
+    };
+    const result = await testLLMConfig(payload);
+    const sample = result.sample ? `\n示例返回：${result.sample}` : '';
+    alert(`${result.message}${sample}`);
+  } catch (error: any) {
+    alert(error?.message || '测试失败，请稍后重试');
+  } finally {
+    testing.value = false;
+  }
 };
 </script>

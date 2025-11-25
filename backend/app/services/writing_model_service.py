@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import List
 
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..repositories.system_config_repository import SystemConfigRepository
 from ..models.system_config import SystemConfig
-from ..schemas.writing_models import WritingModelConfig, WritingModelSettings
+from ..schemas.writing_models import (
+    WritingModelConfig,
+    WritingModelSettings,
+    WritingModelOption,
+    WritingModelOptionsResponse,
+)
+from ..core.config import settings as app_settings
 
 logger = logging.getLogger(__name__)
 
@@ -64,3 +72,75 @@ class WritingModelService:
         if not settings.enabled:
             return []
         return [model for model in settings.models if model.enabled]
+
+    async def resolve_fallback_variants(self) -> int:
+        """获取主模型默认版本数，优先读取系统配置，其次读取环境变量，最后落到应用设置。"""
+        record = await self.config_repo.get_by_key("writer.chapter_versions")
+        if record:
+            try:
+                value = int(record.value) if record.value is not None else None
+                if value and value > 0:
+                    return value
+            except (TypeError, ValueError):
+                logger.warning("系统配置 writer.chapter_versions 值无效：%s", record.value)
+
+        env_candidates = [
+            os.getenv("WRITER_CHAPTER_VERSION_COUNT"),
+            os.getenv("WRITER_CHAPTER_VERSIONS"),
+        ]
+        for raw in env_candidates:
+            if not raw:
+                continue
+            try:
+                value = int(raw)
+                if value > 0:
+                    return value
+            except ValueError:
+                logger.warning("环境变量设置的章节版本数无效：%s", raw)
+
+        return max(app_settings.writer_chapter_versions, 1)
+
+    async def get_public_options(self) -> WritingModelOptionsResponse:
+        settings = await self.get_settings()
+        fallback_variants = await self.resolve_fallback_variants()
+        models = [
+            WritingModelOption(
+                key=model.key,
+                display_name=model.display_name,
+                provider=model.provider,
+                temperature=model.temperature,
+                variants=model.variants,
+            )
+            for model in settings.models
+            if model.enabled
+        ]
+        return WritingModelOptionsResponse(
+            enabled=settings.enabled,
+            fallback_variants=fallback_variants,
+            models=models,
+        )
+
+    async def update_model_variants(self, model_key: str, variants: int) -> WritingModelOptionsResponse:
+        normalized = max(1, min(int(variants), 10))
+        if model_key == "primary":
+            record = await self.config_repo.get_by_key("writer.chapter_versions")
+            if record:
+                record.value = str(normalized)
+            else:
+                self.session.add(SystemConfig(key="writer.chapter_versions", value=str(normalized)))
+            await self.session.commit()
+        else:
+            settings = await self.get_settings()
+            target = None
+            for model in settings.models:
+                if model.key == model_key:
+                    target = model
+                    break
+            if target is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="未找到指定写作模型，请刷新后重试。",
+                )
+            target.variants = normalized
+            await self.save_settings(settings)
+        return await self.get_public_options()

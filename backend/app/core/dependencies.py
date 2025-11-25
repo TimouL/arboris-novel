@@ -1,3 +1,4 @@
+# pragma: allowlist secret
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +9,9 @@ from ..repositories.user_repository import UserRepository
 from ..schemas.user import UserInDB
 from ..services.auth_service import AuthService
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+
+AUTH_TOKEN_URL = "/api/auth/token"
+oauth2_scheme = OAuth2PasswordBearer(**{"tokenUrl": AUTH_TOKEN_URL})  # pragma: allowlist secret
 
 
 async def get_current_user(

@@ -21,9 +21,9 @@ _PREFERRED_CONTENT_KEYS: tuple[str, ...] = (
 
 
 def _normalize_version_content(raw_content: Any, metadata: Any) -> str:
-    text = _coerce_text(metadata)
+    text = _coerce_text(raw_content)
     if not text:
-        text = _coerce_text(raw_content)
+        text = _coerce_text(metadata)
     return text or ""
 
 
@@ -40,7 +40,7 @@ def _coerce_text(value: Any) -> Optional[str]:
                 nested = _coerce_text(value[key])
                 if nested:
                     return nested
-        return _clean_string(json.dumps(value, ensure_ascii=False))
+        return _clean_string(json.dumps(value, ensure_ascii=False), allow_json_parse=False)
     if isinstance(value, (list, tuple, set)):
         parts = [text for text in (_coerce_text(item) for item in value) if text]
         if parts:
@@ -49,11 +49,15 @@ def _coerce_text(value: Any) -> Optional[str]:
     return _clean_string(str(value))
 
 
-def _clean_string(text: str) -> str:
+def _clean_string(text: str, *, allow_json_parse: bool = True) -> str:
     stripped = text.strip()
     if not stripped:
         return stripped
-    if stripped.startswith("{") and stripped.endswith("}"):
+    if (
+        allow_json_parse
+        and stripped.startswith("{")
+        and stripped.endswith("}")
+    ):
         try:
             parsed = json.loads(stripped)
             coerced = _coerce_text(parsed)
@@ -400,9 +404,23 @@ class NovelService:
         return chapter
 
     async def replace_chapter_versions(self, chapter: Chapter, payloads: List[ChapterVersionPayload]) -> List[ChapterVersion]:
+        manual_payloads: List[ChapterVersionPayload] = []
+        for existing in sorted(chapter.versions, key=lambda item: item.created_at):
+            metadata = existing.metadata or {}
+            if metadata.get("source") == "manual":
+                manual_payloads.append(
+                    ChapterVersionPayload(
+                        content=existing.content or "",
+                        metadata=dict(metadata),
+                        provider=existing.provider,
+                        label=existing.version_label,
+                    )
+                )
+
         await self.session.execute(delete(ChapterVersion).where(ChapterVersion.chapter_id == chapter.id))
+        combined_payloads = list(payloads) + manual_payloads
         versions: List[ChapterVersion] = []
-        for index, payload in enumerate(payloads, start=1):
+        for index, payload in enumerate(combined_payloads, start=1):
             text_content = _normalize_version_content(payload.content, payload.metadata)
             metadata = dict(payload.metadata or {})
             metadata.pop("content", None)
@@ -421,6 +439,70 @@ class NovelService:
         await self.session.refresh(chapter)
         await self._touch_project(chapter.project_id)
         return versions
+
+    async def create_manual_chapter_version(
+        self,
+        chapter: Chapter,
+        *,
+        content: str,
+        label: Optional[str],
+        creator_id: int,
+    ) -> ChapterVersion:
+        normalized_content = _normalize_version_content(content, None)
+        metadata: Dict[str, Any] = {"source": "manual", "creator_id": creator_id}
+        version_label = label or await self._generate_manual_label(chapter)
+        version = ChapterVersion(
+            chapter_id=chapter.id,
+            content=normalized_content,
+            metadata=metadata,
+            provider="manual",
+            version_label=version_label,
+        )
+        self.session.add(version)
+        if chapter.status in {
+            ChapterGenerationStatus.NOT_GENERATED.value,
+            ChapterGenerationStatus.FAILED.value,
+            ChapterGenerationStatus.EVALUATION_FAILED.value,
+        }:
+            chapter.status = ChapterGenerationStatus.WAITING_FOR_CONFIRM.value
+        await self.session.commit()
+        await self.session.refresh(chapter)
+        await self._touch_project(chapter.project_id)
+        return version
+
+    async def update_manual_chapter_version(
+        self,
+        version: ChapterVersion,
+        *,
+        content: str,
+        label: Optional[str],
+    ) -> ChapterVersion:
+        normalized_content = _normalize_version_content(content, None)
+        version.content = normalized_content
+        if label:
+            version.version_label = label
+        metadata = dict(version.metadata or {})
+        metadata.setdefault("source", "manual")
+        version.metadata = metadata
+        await self.session.commit()
+        await self.session.refresh(version)
+        await self._touch_project(version.chapter.project_id)
+        return version
+
+    async def _generate_manual_label(self, chapter: Chapter) -> str:
+        stmt = select(ChapterVersion).where(ChapterVersion.chapter_id == chapter.id)
+        result = await self.session.execute(stmt)
+        existing_labels = {
+            version.version_label or ""
+            for version in result.scalars()
+            if (version.metadata or {}).get("source") == "manual"
+        }
+        index = 1
+        while True:
+            candidate = f"人工稿 {index}"
+            if candidate not in existing_labels:
+                return candidate
+            index += 1
 
     async def select_chapter_version(self, chapter: Chapter, version_index: int) -> ChapterVersion:
         versions = sorted(chapter.versions, key=lambda item: item.created_at)
@@ -523,6 +605,10 @@ class NovelService:
             blueprint=blueprint_schema,
             chapters=chapters_schema,
         )
+
+    async def touch_project(self, project_id: str) -> None:
+        """对外暴露的更新时间接口，便于路由层调用。"""
+        await self._touch_project(project_id)
 
     async def _touch_project(self, project_id: str) -> None:
         await self.session.execute(
@@ -671,6 +757,7 @@ class NovelService:
         content = None
         versions: Optional[List[str]] = None
         evaluation_text: Optional[str] = None
+        evaluation_created_at: Optional[datetime] = None
         status_value = ChapterGenerationStatus.NOT_GENERATED.value
         word_count = 0
 
@@ -685,6 +772,7 @@ class NovelService:
                 if chapter.versions:
                     versions = [
                         {
+                            "id": v.id,
                             "content": v.content,
                             "metadata": v.metadata or {},
                             "provider": v.provider,
@@ -695,6 +783,7 @@ class NovelService:
                 if chapter.evaluations:
                     latest = sorted(chapter.evaluations, key=lambda item: item.created_at)[-1]
                     evaluation_text = latest.feedback or latest.decision
+                    evaluation_created_at = latest.created_at
 
         return ChapterSchema(
             chapter_number=chapter_number,
@@ -704,6 +793,7 @@ class NovelService:
             content=content,
             versions=versions,
             evaluation=evaluation_text,
+            evaluation_created_at=evaluation_created_at,
             generation_status=ChapterGenerationStatus(status_value),
             word_count=word_count,
         )

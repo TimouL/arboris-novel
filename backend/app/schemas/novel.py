@@ -1,5 +1,7 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field
 
@@ -65,6 +67,7 @@ class Chapter(ChapterOutline):
     content: Optional[str] = None
     versions: Optional[List[ChapterVersionSchema]] = None
     evaluation: Optional[str] = None
+    evaluation_created_at: Optional[datetime] = None
     generation_status: ChapterGenerationStatus = ChapterGenerationStatus.NOT_GENERATED
 
 
@@ -137,6 +140,18 @@ class NovelSectionResponse(BaseModel):
 class GenerateChapterRequest(BaseModel):
     chapter_number: int
     writing_notes: Optional[str] = Field(default=None, description="章节额外写作指令")
+    model_keys: Optional[List[str]] = Field(
+        default=None,
+        description="本次生成希望启用的附加模型 key 列表，为空则使用全部已启用模型",
+    )
+    error_strategy: Literal["stop", "continue"] = Field(
+        default="stop",
+        description="章节生成遇到错误时的处理策略：stop 表示遇错即停，continue 表示继续尝试后续版本",
+    )
+    format_cleanup: Optional[bool] = Field(
+        default=None,
+        description="是否在章节落库前尝试格式整理（解包 JSON 文本）。为空则使用后端配置开关",
+    )
 
 
 class SelectVersionRequest(BaseModel):
@@ -161,6 +176,42 @@ class DeleteChapterRequest(BaseModel):
 class GenerateOutlineRequest(BaseModel):
     start_chapter: int
     num_chapters: int
+
+
+class StopModelRequest(BaseModel):
+    model_key: str = Field(..., description="要停止的模型 key")
+
+
+class ModelGenerationProgress(BaseModel):
+    model_key: str
+    display_name: str
+    provider: Optional[str] = None
+    status: str
+    total_variants: int
+    completed_variants: int
+    is_primary: bool = False
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+
+class ChapterGenerationProgressResponse(BaseModel):
+    models: List[ModelGenerationProgress] = Field(default_factory=list)
+
+
+class ChapterPromptSection(BaseModel):
+    key: str
+    title: str
+    content: str
+    tokens: int
+    source: Optional[str] = None
+
+
+class ChapterPromptSnapshot(BaseModel):
+    system_prompt: str
+    sections: List[ChapterPromptSection] = Field(default_factory=list)
+    total_tokens: int
+    prompt_input: Optional[str] = None
 
 
 class BlueprintPatch(BaseModel):

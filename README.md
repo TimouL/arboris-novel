@@ -218,6 +218,12 @@ python3 -m venv .venv
 source .venv/bin/activate  # Windows 使用 .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+---
+# 主目录中操作
+python3 -m venv backend/.venv
+source backend/.venv/bin/activate
+pip install -r backend/requirements.txt
+uvicorn backend.app.main:app --reload
 ```
 
 默认会监听 `http://127.0.0.1:8000`，你可以通过 `--host`、`--port` 调整，或加上 `--reload` 保持热重载。
@@ -228,6 +234,11 @@ uvicorn app.main:app --reload
 cd frontend
 npm install
 npm run dev
+---
+# 主目录中操作
+npm install ./frontend
+npm run lint ./frontend 或 npm run build ./frontend 构建
+npm run dev --prefix ./frontend
 ```
 
 开发服务器默认运行在 `http://127.0.0.1:5173`，可通过 `--host` 参数暴露给局域网设备。

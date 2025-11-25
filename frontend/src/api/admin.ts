@@ -145,15 +145,30 @@ export interface WritingModelConfig {
   base_url?: string | null
   api_key?: string | null
   temperature: number
-  variants: number
+  variants?: number | null
   enabled: boolean
 }
 
 export interface WritingModelSettings {
   enabled: boolean
-  fallback_variants: number
   models: WritingModelConfig[]
 }
+
+export interface WritingModelTestRequest {
+  model: string
+  base_url?: string | null
+  api_key?: string | null
+  temperature?: number
+  timeout?: number
+  prompt?: string | null
+}
+
+export interface WritingModelTestResponse {
+  success: boolean
+  message: string
+  sample?: string | null
+}
+
 
 export class AdminAPI {
   private static request(path: string, options: RequestInit = {}) {
@@ -288,6 +303,13 @@ export class AdminAPI {
     })
   }
 
+  static testWritingModelConnection(payload: WritingModelTestRequest): Promise<WritingModelTestResponse> {
+    return this.request('/writing-models/test', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  }
+
   static changePassword(oldPassword: string, newPassword: string): Promise<void> {
     return this.request('/password', {
       method: 'POST',
@@ -297,4 +319,6 @@ export class AdminAPI {
       })
     })
   }
+
+  // Vector store management
 }

@@ -1,5 +1,6 @@
 import { useAuthStore } from '@/stores/auth'
 import router from '@/router'
+import { useAuthStore as resolveAuthStore } from '@/stores/auth'
 
 // API 配置
 // 在生产环境中使用相对路径，在开发环境中使用绝对路径
@@ -8,7 +9,7 @@ export const API_PREFIX = '/api'
 
 // 统一的请求处理函数
 const request = async (url: string, options: RequestInit = {}) => {
-  const authStore = useAuthStore()
+  const authStore = resolveAuthStore()
   const headers = new Headers({
     'Content-Type': 'application/json',
     ...options.headers
@@ -30,6 +31,10 @@ const request = async (url: string, options: RequestInit = {}) => {
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}))
     throw new Error(errorData.detail || `请求失败，状态码: ${response.status}`)
+  }
+
+  if (response.status === 204) {
+    return
   }
 
   return response.json()
@@ -91,6 +96,38 @@ export interface ChapterVersion {
   label?: string | null
 }
 
+export interface ModelGenerationProgress {
+  model_key: string
+  display_name: string
+  provider?: string | null
+  status: 'pending' | 'generating' | 'stopping' | 'completed' | 'stopped' | 'error'
+  total_variants: number
+  completed_variants: number
+  is_primary: boolean
+  started_at?: string | null
+  finished_at?: string | null
+  error_message?: string | null
+}
+
+export interface ChapterGenerationProgressResponse {
+  models: ModelGenerationProgress[]
+}
+
+export interface PromptSection {
+  key: string
+  title: string
+  content: string
+  tokens: number
+  source?: string | null
+}
+
+export interface PromptSnapshot {
+  system_prompt: string
+  sections: PromptSection[]
+  total_tokens: number
+  prompt_input?: string | null
+}
+
 export interface Chapter {
   chapter_number: number
   title: string
@@ -98,6 +135,7 @@ export interface Chapter {
   content: string | null
   versions: ChapterVersion[] | null
   evaluation: string | null
+  evaluation_created_at?: string | null
   generation_status: 'not_generated' | 'generating' | 'evaluating' | 'selecting' | 'failed' | 'evaluation_failed' | 'waiting_for_confirm' | 'successful'
   word_count?: number  // 字数统计
 }
@@ -131,6 +169,35 @@ export interface ChapterGenerationResponse {
   evaluation: string | null
   ai_message: string
   chapter_number: number
+}
+
+export interface WritingModelOption {
+  key: string
+  display_name: string
+  provider?: string | null
+  temperature: number
+  variants?: number | null
+}
+
+export interface WritingModelOptionsResponse {
+  enabled: boolean
+  fallback_variants: number
+  models: WritingModelOption[]
+}
+
+export interface AIDetectionSegment {
+  label: number
+  text: string
+}
+
+export interface AIDetectionResponse {
+  status: 'idle' | 'running' | 'success' | 'error'
+  confidence?: number
+  available_uses?: number
+  segments: AIDetectionSegment[]
+  text_hash?: string
+  error_message?: string
+  content_hash?: string
 }
 
 export interface DeleteNovelsResponse {
@@ -198,10 +265,26 @@ export class NovelAPI {
     })
   }
 
-  static async generateChapter(projectId: string, chapterNumber: number): Promise<NovelProject> {
+  static async generateChapter(
+    projectId: string,
+    chapterNumber: number,
+    modelKeys?: string[] | null,
+    errorStrategy: 'stop' | 'continue' = 'stop',
+    formatCleanup?: boolean
+  ): Promise<NovelProject> {
+    const payload: Record<string, any> = {
+      chapter_number: chapterNumber,
+      error_strategy: errorStrategy
+    }
+    if (modelKeys !== undefined) {
+      payload.model_keys = modelKeys
+    }
+    if (typeof formatCleanup === 'boolean') {
+      payload.format_cleanup = formatCleanup
+    }
     return request(`${WRITER_BASE}/${projectId}/chapters/generate`, {
       method: 'POST',
-      body: JSON.stringify({ chapter_number: chapterNumber })
+      body: JSON.stringify(payload)
     })
   }
 
@@ -290,5 +373,80 @@ export class NovelAPI {
         content: content
       })
     })
+  }
+
+  static async getChapterGenerationProgress(
+    projectId: string,
+    chapterNumber: number
+  ): Promise<ChapterGenerationProgressResponse> {
+    return request(`${WRITER_BASE}/${projectId}/chapters/${chapterNumber}/generation-progress`)
+  }
+
+  static async getChapterPromptSnapshot(
+    projectId: string,
+    chapterNumber: number
+  ): Promise<PromptSnapshot> {
+    return request(`${WRITER_BASE}/${projectId}/chapters/${chapterNumber}/prompt-snapshot`)
+  }
+
+  static async getChapterPromptPreview(
+    projectId: string,
+    chapterNumber: number
+  ): Promise<PromptSnapshot> {
+    return request(`${WRITER_BASE}/${projectId}/chapters/${chapterNumber}/prompt-preview`)
+  }
+
+  static async stopModelGeneration(
+    projectId: string,
+    chapterNumber: number,
+    modelKey: string
+  ): Promise<void> {
+    await request(`${WRITER_BASE}/${projectId}/chapters/${chapterNumber}/stop`, {
+      method: 'POST',
+      body: JSON.stringify({ model_key: modelKey })
+    })
+  }
+
+  static async getWritingModelOptions(): Promise<WritingModelOptionsResponse> {
+    return request(`${API_BASE_URL}${WRITER_PREFIX}/writing-models/options`)
+  }
+
+  static async updateWritingModelVariants(
+    modelKey: string,
+    variants: number
+  ): Promise<WritingModelOptionsResponse> {
+    return request(`${API_BASE_URL}${WRITER_PREFIX}/writing-models/variants`, {
+      method: 'POST',
+      body: JSON.stringify({
+        model_key: modelKey,
+        variants
+      })
+    })
+  }
+
+  static async detectChapterAI(
+    projectId: string,
+    chapterNumber: number,
+    text?: string,
+    timeoutSeconds?: number
+  ): Promise<AIDetectionResponse> {
+    const payload: Record<string, any> = {}
+    if (text) {
+      payload.text = text
+    }
+    if (timeoutSeconds !== undefined) {
+      payload.timeout_seconds = timeoutSeconds
+    }
+    return request(`${API_BASE_URL}/api/detection/novels/${projectId}/chapters/${chapterNumber}/ai-detect`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  }
+
+  static async getLatestAIDetection(
+    projectId: string,
+    chapterNumber: number
+  ): Promise<AIDetectionResponse> {
+    return request(`${API_BASE_URL}/api/detection/novels/${projectId}/chapters/${chapterNumber}/latest`)
   }
 }
